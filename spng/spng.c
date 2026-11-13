@@ -1925,11 +1925,12 @@ static inline void scale_row(unsigned char *row, uint32_t pixels, int fmt, unsig
 }
 
 /* Expand to *row using 8-bit palette indices from *scanline */
-static void expand_row(unsigned char *row,
+static int expand_row(unsigned char *row,
                        const unsigned char *scanline,
                        const union spng__decode_plte *decode_plte,
                        uint32_t width,
-                       int fmt)
+                       int fmt,
+                       uint32_t n_entries)
 {
     uint32_t i = 0;
     unsigned char *px;
@@ -1937,6 +1938,15 @@ static void expand_row(unsigned char *row,
     const struct spng_plte_entry *plte = decode_plte->rgba;
 
 #if defined(SPNG_ARM)
+    /* The SIMD routines index the 256-entry LUT directly; validate every
+    index first so an out-of-range palette entry is reported instead of
+    silently expanding an unused LUT slot. */
+    for(i = 0; i < width; i++)
+    {
+        if(scanline[i] >= n_entries) return SPNG_EPLTE_IDX;
+    }
+    i = 0;
+
     if(fmt == SPNG_FMT_RGBA8) i = expand_palette_rgba8_neon(row, scanline, decode_plte->raw, width);
     else if(fmt == SPNG_FMT_RGB8)
     {
@@ -1946,11 +1956,12 @@ static void expand_row(unsigned char *row,
         {/* In this case the LUT is 3 bytes packed */
             px = row + i * 3;
             entry = scanline[i];
+            if(entry >= n_entries) return SPNG_EPLTE_IDX;
             px[0] = decode_plte->raw[entry * 3 + 0];
             px[1] = decode_plte->raw[entry * 3 + 1];
             px[2] = decode_plte->raw[entry * 3 + 2];
         }
-        return;
+        return 0;
     }
 #endif
 
@@ -1960,6 +1971,7 @@ static void expand_row(unsigned char *row,
         {
             px = row + i * 4;
             entry = scanline[i];
+            if(entry >= n_entries) return SPNG_EPLTE_IDX;
             px[0] = plte[entry].red;
             px[1] = plte[entry].green;
             px[2] = plte[entry].blue;
@@ -1972,11 +1984,14 @@ static void expand_row(unsigned char *row,
         {
             px = row + i * 3;
             entry = scanline[i];
+            if(entry >= n_entries) return SPNG_EPLTE_IDX;
             px[0] = plte[entry].red;
             px[1] = plte[entry].green;
             px[2] = plte[entry].blue;
         }
     }
+
+    return 0;
 }
 
 /* Unpack 1/2/4/8-bit samples to G8/GA8/GA16 or G16 -> GA16 */
@@ -3386,7 +3401,9 @@ int spng_decode_scanline(spng_ctx *ctx, void *out, size_t len)
             {
                 if(fmt & (SPNG_FMT_RGBA8 | SPNG_FMT_RGB8))
                 {
-                    expand_row(out, scanline, &ctx->decode_plte, width, fmt);
+                    ret = expand_row(out, scanline, &ctx->decode_plte, width, fmt,
+                                     ctx->plte.n_entries);
+                    if(ret) return decode_err(ctx, ret);
                     break;
                 }
 
@@ -3396,6 +3413,8 @@ int spng_decode_scanline(spng_ctx *ctx, void *out, size_t len)
             {
                 entry = get_sample(&iter);
             }
+
+            if(entry >= ctx->plte.n_entries) return decode_err(ctx, SPNG_EPLTE_IDX);
 
             if(fmt & (SPNG_FMT_RGBA8 | SPNG_FMT_RGB8))
             {
@@ -3885,7 +3904,7 @@ int spng_decode_image(spng_ctx *ctx, void *out, size_t len, int fmt, int flags)
         uint8_t red, green, blue, alpha;
 
         uint32_t i;
-        for(i=0; i < 256; i++)
+        for(i=0; i < ctx->plte.n_entries; i++)
         {
             if(f.apply_trns && i < ctx->trns.n_type3_entries)
                 ctx->plte.entries[i].alpha = ctx->trns.type3_alpha[i];
@@ -3910,6 +3929,27 @@ int spng_decode_image(spng_ctx *ctx, void *out, size_t len, int fmt, int flags)
             plte[i].green = green;
             plte[i].blue = blue;
             plte[i].alpha = alpha;
+        }
+
+        /* Fill the unused tail of the decode LUT with an explicit, safe
+        default. Indices reaching these slots are invalid and are rejected
+        during scanline decoding; this keeps the table deterministic rather
+        than relying on zero-initialized memory. */
+        for(i = ctx->plte.n_entries; i < 256; i++)
+        {
+#if defined(SPNG_ARM)
+            if(fmt == SPNG_FMT_RGB8 && ihdr->bit_depth == 8)
+            {
+                ctx->decode_plte.rgb[i * 3 + 0] = 0;
+                ctx->decode_plte.rgb[i * 3 + 1] = 0;
+                ctx->decode_plte.rgb[i * 3 + 2] = 0;
+                continue;
+            }
+#endif
+            plte[i].red = 0;
+            plte[i].green = 0;
+            plte[i].blue = 0;
+            plte[i].alpha = 255;
         }
 
         f.apply_trns = 0;

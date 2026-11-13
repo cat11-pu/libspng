@@ -1,0 +1,14 @@
+image                           ref  orig_rc  fixed_rc  fixed_vs_ref
+case1_trns_bleed.png             ok        0         0     IDENTICAL
+case1_trns_bleed_il.png          ok        0         0     IDENTICAL
+case2_edge_fringe.png            ok        0         0     IDENTICAL
+case2_edge_fringe_il.png         ok        0         0     IDENTICAL
+case2b_edge_2bit.png             ok        0         0     IDENTICAL
+case3_bad_index.png          reject        0        35           n/a
+case3_bad_index_il.png       reject        0        35           n/a
+case3b_bad_index_8bit.png    reject        0        35           n/a
+case3c_bad_last.png          reject        0        35           n/a
+case4_short_trns.png             ok        0         0     IDENTICAL
+edge_bad.png                 reject        0        35           n/a
+random valid batch: 48/48 pixel-identical to reference
+PngSuite indexed: 63/63 pixel-identical to reference

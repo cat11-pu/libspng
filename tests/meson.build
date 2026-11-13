@@ -36,6 +36,12 @@ test('info', test_exe, args : 'info')
 cpp_exe = executable('cpp_exe', 'test.cpp', dependencies : spng_dep)
 test('cpp_test', cpp_exe)
 
+palette_index_test_exe = executable('palette_index_test',
+    'palette_index_test.c',
+    dependencies : spng_dep
+)
+test('palette_index_test', palette_index_test_exe)
+
 subdir('images')
 subdir('crashers')
 subdir('misc')
