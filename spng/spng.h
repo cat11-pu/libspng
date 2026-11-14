@@ -432,6 +432,16 @@ struct spng_row_info
     uint8_t filter;
 };
 
+/* Region of the decoded image, coordinates are output pixel coordinates,
+   x/y is the top-left corner, width/height extend right and down. */
+struct spng_region
+{
+    uint32_t x;
+    uint32_t y;
+    uint32_t width;
+    uint32_t height;
+};
+
 typedef struct spng_ctx spng_ctx;
 
 typedef int spng_read_fn(spng_ctx *ctx, void *user, void *dest, size_t length);
@@ -464,6 +474,12 @@ SPNG_API int spng_decoded_image_size(spng_ctx *ctx, int fmt, size_t *len);
 
 /* Decode */
 SPNG_API int spng_decode_image(spng_ctx *ctx, void *out, size_t len, int fmt, int flags);
+SPNG_API int spng_decode_image_region(spng_ctx *ctx, void *out, size_t len, int fmt, int flags,
+                                      const struct spng_region *region);
+
+/* Calculate the output buffer size needed by spng_decode_image_region() */
+SPNG_API int spng_decoded_region_size(spng_ctx *ctx, int fmt,
+                                      const struct spng_region *region, size_t *len);
 
 /* Progressive decode */
 SPNG_API int spng_decode_scanline(spng_ctx *ctx, void *out, size_t len);

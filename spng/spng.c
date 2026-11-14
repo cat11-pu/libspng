@@ -341,10 +341,19 @@ struct spng_ctx
     z_stream zstream;
     unsigned char *scanline_buf, *prev_scanline_buf, *row_buf, *filtered_scanline_buf;
     unsigned char *scanline, *prev_scanline, *row, *filtered_scanline;
+    unsigned char *region_row_buf; /* full-width scratch row for region decode */
+    unsigned char *region_accum_buf; /* region-sized Adam7 accumulator */
 
     /* based on fmt */
     size_t image_size; /* may be zero */
     size_t image_width;
+
+    /* Region decode (spng_decode_image_region) */
+    unsigned region_decode: 1;
+    uint32_t region_x, region_y;
+    uint32_t region_width, region_height;
+    size_t region_row_size; /* output bytes per region row */
+    size_t region_size; /* total output size, may be zero on overflow */
 
     unsigned bytes_per_pixel; /* derived from ihdr */
     unsigned pixel_size; /* derived from spng_format+ihdr */
@@ -3616,7 +3625,102 @@ int spng_decode_chunks(spng_ctx *ctx)
     return read_chunks(ctx, 0);
 }
 
+/* Validate and clamp a region against the decoded image dimensions.
+   The stored region is always fully inside the image. */
+static int validate_region(spng_ctx *ctx, int fmt, const struct spng_region *region)
+{
+    const struct spng_ihdr *ihdr = &ctx->ihdr;
+
+    if(region == NULL) return SPNG_EINVAL;
+    if(region->width == 0 || region->height == 0) return SPNG_EINVAL;
+
+    /* Region must start inside the image, it is clipped at the far edge. */
+    if(region->x >= ihdr->width || region->y >= ihdr->height) return SPNG_EINVAL;
+
+    /* Sub-byte PNG/RAW rows cannot be cropped horizontally without
+       shifting packed samples, reject rather than return wrong pixels. */
+    if((fmt & (SPNG_FMT_PNG | SPNG_FMT_RAW)) && ihdr->bit_depth < 8)
+        return SPNG_EFMT;
+
+    uint64_t x_end = (uint64_t)region->x + region->width;
+    uint64_t y_end = (uint64_t)region->y + region->height;
+
+    if(x_end > ihdr->width) x_end = ihdr->width;
+    if(y_end > ihdr->height) y_end = ihdr->height;
+
+    ctx->region_x = region->x;
+    ctx->region_y = region->y;
+    ctx->region_width = (uint32_t)(x_end - region->x);
+    ctx->region_height = (uint32_t)(y_end - region->y);
+
+    return 0;
+}
+
+/* Output bytes per pixel for a destination format, the same values used
+   when deinterlacing rows. */
+static size_t region_pixel_size(int fmt)
+{
+    switch(fmt)
+    {
+        case SPNG_FMT_RGBA16: return 8;
+        case SPNG_FMT_RGBA8: return 4;
+        case SPNG_FMT_RGB8: return 3;
+        case SPNG_FMT_GA16: return 4;
+        case SPNG_FMT_GA8: return 2;
+        case SPNG_FMT_G8: return 1;
+        default: return 0; /* PNG/RAW: byte-packed, handled separately */
+    }
+}
+
+int spng_decoded_region_size(spng_ctx *ctx, int fmt,
+                             const struct spng_region *region, size_t *len)
+{
+    if(ctx == NULL || len == NULL) return 1;
+
+    int ret = read_chunks(ctx, 1);
+    if(ret) return ret;
+
+    ret = check_decode_fmt(&ctx->ihdr, fmt);
+    if(ret) return ret;
+
+    struct spng_region clipped;
+    ret = validate_region(ctx, fmt, region);
+    if(ret) return ret;
+
+    clipped.x = ctx->region_x;
+    clipped.y = ctx->region_y;
+    clipped.width = ctx->region_width;
+    clipped.height = ctx->region_height;
+
+    size_t row_bytes;
+
+    if(fmt & (SPNG_FMT_PNG | SPNG_FMT_RAW))
+    {
+        /* Bit depth >= 8 here, bytes per pixel is power-of-two aligned. */
+        size_t bpp = (size_t)ctx->bytes_per_pixel;
+        row_bytes = (size_t)clipped.width * bpp;
+    }
+    else
+    {
+        size_t pixel_size = region_pixel_size(fmt);
+        if(pixel_size == 0) return SPNG_EFMT;
+        row_bytes = (size_t)clipped.width * pixel_size;
+    }
+
+    if(row_bytes > SIZE_MAX / clipped.height) return SPNG_EOVERFLOW;
+
+    *len = row_bytes * clipped.height;
+
+    return 0;
+}
+
 int spng_decode_image(spng_ctx *ctx, void *out, size_t len, int fmt, int flags)
+{
+    return spng_decode_image_region(ctx, out, len, fmt, flags, NULL);
+}
+
+int spng_decode_image_region(spng_ctx *ctx, void *out, size_t len, int fmt, int flags,
+                             const struct spng_region *region)
 {
     if(ctx == NULL) return 1;
     if(ctx->encode_only) return SPNG_ECTXTYPE;
@@ -3624,6 +3728,16 @@ int spng_decode_image(spng_ctx *ctx, void *out, size_t len, int fmt, int flags)
     if(ctx->state == SPNG_STATE_ENCODE_INIT) return SPNG_EOPSTATE;
 
     const struct spng_ihdr *ihdr = &ctx->ihdr;
+
+    ctx->region_decode = (region != NULL);
+
+    if(ctx->region_decode)
+    {
+        if(flags & SPNG_DECODE_PROGRESSIVE) return SPNG_EFLAGS;
+
+        int rret = validate_region(ctx, fmt, region);
+        if(rret) return rret;
+    }
 
     int ret = read_chunks(ctx, 0);
     if(ret) return decode_err(ctx, ret);
@@ -3637,11 +3751,33 @@ int spng_decode_image(spng_ctx *ctx, void *out, size_t len, int fmt, int flags)
     if(ctx->image_width > SIZE_MAX / ihdr->height) ctx->image_size = 0; /* overflow */
     else ctx->image_size = ctx->image_width * ihdr->height;
 
+    if(ctx->region_decode)
+    {
+        size_t pixel_size = region_pixel_size(fmt);
+
+        if(fmt & (SPNG_FMT_PNG | SPNG_FMT_RAW)) pixel_size = ctx->bytes_per_pixel;
+        else if(pixel_size == 0) return SPNG_EFMT;
+
+        ctx->region_row_size = (size_t)ctx->region_width * pixel_size;
+
+        if(ctx->region_row_size > SIZE_MAX / ctx->region_height) ctx->region_size = 0;
+        else ctx->region_size = ctx->region_row_size * ctx->region_height;
+    }
+
     if( !(flags & SPNG_DECODE_PROGRESSIVE) )
     {
         if(out == NULL) return 1;
-        if(!ctx->image_size) return SPNG_EOVERFLOW;
-        if(len < ctx->image_size) return SPNG_EBUFSIZ;
+
+        if(ctx->region_decode)
+        {
+            if(!ctx->region_size) return SPNG_EOVERFLOW;
+            if(len < ctx->region_size) return SPNG_EBUFSIZ;
+        }
+        else
+        {
+            if(!ctx->image_size) return SPNG_EOVERFLOW;
+            if(len < ctx->image_size) return SPNG_EBUFSIZ;
+        }
     }
 
     uint32_t bytes_read = 0;
@@ -3695,11 +3831,41 @@ int spng_decode_image(spng_ctx *ctx, void *out, size_t len, int fmt, int flags)
 
     if(ihdr->interlace_method)
     {
-        f.interlaced = 1;
         ctx->row_buf = spng__malloc(ctx, ctx->image_width);
         ctx->row = ctx->row_buf;
 
         if(ctx->row == NULL) return decode_err(ctx, SPNG_EMEM);
+
+        f.interlaced = 1;
+    }
+
+    if(ctx->region_decode)
+    {
+        if(ihdr->interlace_method)
+        {
+            /* Adam7 assembles each deinterlaced row from up to seven passes
+               with disjoint x positions. A full-width scratch row receives
+               each pass's contiguous pixels and a region-sized, zeroed
+               accumulator collects only the pixels inside the rectangle, so
+               internal memory scales with the region rather than image
+               height. Sub-byte PNG/RAW output is rejected above, hence every
+               pixel is byte addressable. */
+            ctx->region_row_buf = spng__malloc(ctx, ctx->image_width);
+            if(ctx->region_row_buf == NULL) return decode_err(ctx, SPNG_EMEM);
+
+            if(ctx->region_size > SIZE_MAX - ctx->image_width)
+                return decode_err(ctx, SPNG_EOVERFLOW);
+            ctx->region_accum_buf = spng__calloc(ctx, 1, ctx->region_size);
+            if(ctx->region_accum_buf == NULL) return decode_err(ctx, SPNG_EMEM);
+        }
+        else
+        {
+            /* One full-width scratch row is enough when not interlaced. */
+            ctx->region_row_buf = spng__malloc(ctx, ctx->image_width);
+            ctx->row = ctx->region_row_buf;
+        }
+
+        if(ctx->region_row_buf == NULL) return decode_err(ctx, SPNG_EMEM);
     }
 
     if(ctx->scanline == NULL || ctx->prev_scanline == NULL)
@@ -3993,6 +4159,129 @@ int spng_decode_image(spng_ctx *ctx, void *out, size_t len, int fmt, int flags)
 
     if(flags & SPNG_DECODE_PROGRESSIVE)
     {
+        return 0;
+    }
+
+    if(ctx->region_decode)
+    {
+        /* Decode every scanline (the PNG filters chain across rows and the
+           DEFLATE stream is strictly sequential, so rows above the region
+           must still be inflated and defiltered), but only convert and copy
+           rows covered by the region. The output buffer holds region_height
+           tightly packed rows of region_row_size bytes. */
+        const uint32_t ry = ctx->region_y;
+        const uint32_t ry_end = ctx->region_y + ctx->region_height;
+        const uint32_t rx = ctx->region_x;
+        const size_t rrow = ctx->region_row_size;
+        unsigned char *scratch = ctx->region_row_buf;
+        unsigned char *accum = ctx->region_accum_buf; /* region-sized, zeroed */
+
+        if(fmt & (SPNG_FMT_PNG | SPNG_FMT_RAW)) pixel_size = ctx->bytes_per_pixel;
+
+        for(;;)
+        {
+            uint32_t row_num = ri->row_num;
+            size_t region_row_idx = (size_t)(row_num - ry);
+
+            if(row_num >= ry && row_num < ry_end)
+            {
+                if(ihdr->interlace_method)
+                {
+                    const int cur_pass = ri->pass;
+
+                    /* Drive the same state machine as a full interlaced
+                       decode: spng_decode_row() decodes one pass scanline and
+                       scatters its samples at full-image x positions into the
+                       scratch row. We then keep only the region columns. The
+                       scratch is private, never aliased with the accumulator
+                       or the caller buffer. */
+                    ret = spng_decode_row(ctx, scratch, ctx->image_width);
+
+                    if(ret == 0 || ret == SPNG_EOI)
+                    {
+                        const int pass = cur_pass;
+                        const uint32_t xs = adam7_x_start[pass];
+                        const uint32_t xd = adam7_x_delta[pass];
+                        const uint32_t pass_width = sub[pass].width;
+                        unsigned char *dst = accum + region_row_idx * rrow;
+
+                        uint32_t k;
+                        for(k=0; k < pass_width; k++)
+                        {
+                            uint32_t image_x = xs + (uint32_t)k * xd;
+                            if(image_x < ctx->region_x ||
+                               image_x >= ctx->region_x + ctx->region_width)
+                                continue;
+
+                            uint32_t local_x = image_x - ctx->region_x;
+                            memcpy(dst + (size_t)local_x * pixel_size,
+                                   scratch + (size_t)image_x * pixel_size,
+                                   pixel_size);
+                        }
+                    }
+
+                    if(ret == SPNG_EOI) break;
+                }
+                else
+                {
+                    ret = spng_decode_row(ctx, scratch, ctx->image_width);
+
+                    if(ret == 0 || ret == SPNG_EOI)
+                    {
+                        memcpy((unsigned char*)out + region_row_idx * rrow,
+                               scratch + (size_t)rx * pixel_size, rrow);
+                    }
+
+                    if(ret == SPNG_EOI) break;
+                }
+            }
+            else
+            {
+                /* Outside the region: keep the filter chain intact by
+                   inflating and defiltering, but skip pixel conversion. */
+                ret = read_scanline(ctx);
+                if(ret) break;
+
+                /* read_scanline() leaves the buffer swap to its caller;
+                   spng_decode_scanline() swaps after converting, do the
+                   same here so the next row's "previous" scanline is valid. */
+                {
+                    unsigned char *t = ctx->prev_scanline;
+                    ctx->prev_scanline = ctx->scanline;
+                    ctx->scanline = t;
+                }
+
+                /* read_scanline() only inflates and defilters; advance the
+                   row/pass state the same way spng_decode_scanline() does. */
+                ret = update_row_info(ctx);
+
+                if(ret == SPNG_EOI)
+                {
+                    if(ctx->cur_chunk_bytes_left)
+                    {
+                        int error = discard_chunk_bytes(ctx, ctx->cur_chunk_bytes_left);
+                        if(error) return decode_err(ctx, error);
+                    }
+
+                    ctx->last_idat = ctx->current_chunk;
+                    break;
+                }
+            }
+        }
+
+        if(ret != SPNG_EOI) return decode_err(ctx, ret);
+
+        if(ihdr->interlace_method)
+        {
+            /* Copy the region-sized deinterlaced accumulator into output. */
+            uint32_t y;
+            for(y = 0; y < ctx->region_height; y++)
+            {
+                memcpy((unsigned char*)out + (size_t)y * rrow,
+                       accum + (size_t)y * rrow, rrow);
+            }
+        }
+
         return 0;
     }
 
@@ -5003,6 +5292,8 @@ void spng_ctx_free(spng_ctx *ctx)
     spng__free(ctx, ctx->scanline_buf);
     spng__free(ctx, ctx->prev_scanline_buf);
     spng__free(ctx, ctx->filtered_scanline_buf);
+    spng__free(ctx, ctx->region_row_buf);
+    spng__free(ctx, ctx->region_accum_buf);
 
     spng_free_fn *free_fn = ctx->alloc.free_fn;
 

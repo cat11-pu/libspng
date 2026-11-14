@@ -231,6 +231,64 @@ The `SPNG_DECODE_PROGRESSIVE` flag is supported in all cases.
 The alpha channel is always [straight alpha](https://en.wikipedia.org/wiki/Alpha_compositing#Straight_versus_premultiplied),
 premultiplied alpha is not supported.
 
+## Region decoding
+
+```c
+struct spng_region
+{
+    uint32_t x;
+    uint32_t y;
+    uint32_t width;
+    uint32_t height;
+};
+
+int spng_decoded_region_size(spng_ctx *ctx, int fmt,
+                             const struct spng_region *region, size_t *len);
+
+int spng_decode_image_region(spng_ctx *ctx, void *out, size_t len,
+                             int fmt, int flags,
+                             const struct spng_region *region);
+```
+
+`spng_decode_image_region()` decodes only the rectangular part of the image
+covered by `region` and writes it to `out` as a tightly packed image of
+`region.width` by the clipped region height. The output is byte-for-byte
+identical to decoding the whole image with `spng_decode_image()` and then
+cropping the same rectangle.
+
+Coordinates are output pixel coordinates with the origin at the top-left.
+The region origin (`x`, `y`) must lie inside the image. A region that extends
+past the right or bottom edge is clipped to the image dimensions; the clipped
+dimensions are reflected in the value returned by `spng_decoded_region_size()`.
+
+Use `spng_decoded_region_size()` to calculate the required output buffer size
+for the (possibly clipped) region, and pass at least that many bytes as `len`.
+
+### Boundary conditions and errors
+
+* `region` is `NULL`, or `width`/`height` is zero: returns `SPNG_EINVAL`.
+* `x >= ihdr.width` or `y >= ihdr.height`: returns `SPNG_EINVAL`,
+  regions are clipped only at the far edge, never shifted.
+* An output buffer shorter than `spng_decoded_region_size()`: `SPNG_EBUFSIZ`.
+* `SPNG_DECODE_PROGRESSIVE` is not supported and returns `SPNG_EFLAGS`.
+* `SPNG_FMT_PNG`/`SPNG_FMT_RAW` with a bit depth below 8 returns `SPNG_EFMT`:
+  the packed samples cannot be cropped on a pixel boundary. Decode to
+  `SPNG_FMT_G8` (grayscale) or an RGBA/RGB palette format instead, these are
+  unpacked to one byte or more per pixel and support horizontal cropping.
+* Like `spng_decode_image()`, the function can only be called once per
+  context and returns `SPNG_EOI` on a second call.
+
+### Memory and CPU behavior
+
+PNG filters reference the previous scanline and the DEFLATE stream is strictly
+sequential, so every scanline up to the bottom of the region is still inflated
+and defiltered; scanlines outside the region skip only the pixel conversion
+and are not written to the output. The caller's output buffer, and for
+non-interlaced images the library's working buffers, scale with the region
+height rather than the image height. For Adam7-interlaced images an additional
+region-sized accumulator and one full-width scratch row are used, which scale
+with the region dimensions, not the image height.
+
 ## Progressive image decoding
 
 If the `SPNG_DECODE_PROGRESSIVE` flag is set the decoder will be initialized

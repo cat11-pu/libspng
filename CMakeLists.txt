@@ -38,6 +38,8 @@ if(SPNG_SHARED)
     if(BUILD_EXAMPLES)
         add_executable(example examples/example.c)
         target_link_libraries(example PRIVATE spng)
+        add_executable(example_region examples/example_region.c)
+        target_link_libraries(example_region PRIVATE spng)
     endif()
 endif()
 

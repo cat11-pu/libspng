@@ -1,0 +1,49 @@
+tests/region/big_n.png   1024x1024 depth=8 non-int
+  full   : output= 4194304 B  internal_peak= 4246962 B  total= 8441266 B
+  region h=1024: output= 4194304 B (100.0%) internal_peak= 4251058 B  total= 8445362 B  decode_rc=0
+  region h=512: output= 2097152 B ( 50.0%) internal_peak= 2153906 B  total= 4251058 B  decode_rc=0
+  region h=256: output= 1048576 B ( 25.0%) internal_peak= 1105330 B  total= 2153906 B  decode_rc=0
+  region h=128: output=  524288 B ( 12.5%) internal_peak=  581042 B  total= 1105330 B  decode_rc=0
+  region h= 1: output=    4096 B (  0.1%) internal_peak=   60850 B  total=   64946 B  decode_rc=0
+tests/region/big_i.png   1024x1024 depth=8 Adam7
+  full   : output= 4194304 B  internal_peak= 4251058 B  total= 8445362 B
+  region h=1024: output= 4194304 B (100.0%) internal_peak= 8449458 B  total=12643762 B  decode_rc=0
+  region h=512: output= 2097152 B ( 50.0%) internal_peak= 4255154 B  total= 6352306 B  decode_rc=0
+  region h=256: output= 1048576 B ( 25.0%) internal_peak= 2158002 B  total= 3206578 B  decode_rc=0
+  region h=128: output=  524288 B ( 12.5%) internal_peak= 1109426 B  total= 1633714 B  decode_rc=0
+  region h= 1: output=    4096 B (  0.1%) internal_peak=   69042 B  total=   73138 B  decode_rc=0
+tests/images/basn6a08.png 32x32 depth=8 non-int
+  full   : output=    4096 B  internal_peak=   48818 B  total=   52914 B
+  region h=32: output=    4096 B (100.0%) internal_peak=   48946 B  total=   53042 B  decode_rc=0
+  region h=16: output=    2048 B ( 50.0%) internal_peak=   46898 B  total=   48946 B  decode_rc=0
+  region h= 8: output=    1024 B ( 25.0%) internal_peak=   45874 B  total=   46898 B  decode_rc=0
+  region h= 4: output=     512 B ( 12.5%) internal_peak=   45362 B  total=   45874 B  decode_rc=0
+  region h= 1: output=     128 B (  3.1%) internal_peak=   44978 B  total=   45106 B  decode_rc=0
+tests/images/basi6a08.png 32x32 depth=8 Adam7
+  full   : output=    4096 B  internal_peak=   48946 B  total=   53042 B
+  region h=32: output=    4096 B (100.0%) internal_peak=   53170 B  total=   57266 B  decode_rc=0
+  region h=16: output=    2048 B ( 50.0%) internal_peak=   49074 B  total=   51122 B  decode_rc=0
+  region h= 8: output=    1024 B ( 25.0%) internal_peak=   47026 B  total=   48050 B  decode_rc=0
+  region h= 4: output=     512 B ( 12.5%) internal_peak=   46002 B  total=   46514 B  decode_rc=0
+  region h= 1: output=     128 B (  3.1%) internal_peak=   45234 B  total=   45362 B  decode_rc=0
+tests/images/basn2c16.png 32x32 depth=16 non-int
+  full   : output=    8192 B  internal_peak=   53042 B  total=   61234 B
+  region h=32: output=    8192 B (100.0%) internal_peak=   53298 B  total=   61490 B  decode_rc=0
+  region h=16: output=    4096 B ( 50.0%) internal_peak=   49202 B  total=   53298 B  decode_rc=0
+  region h= 8: output=    2048 B ( 25.0%) internal_peak=   47154 B  total=   49202 B  decode_rc=0
+  region h= 4: output=    1024 B ( 12.5%) internal_peak=   46130 B  total=   47154 B  decode_rc=0
+  region h= 1: output=     256 B (  3.1%) internal_peak=   45362 B  total=   45618 B  decode_rc=0
+tests/images/basi2c16.png 32x32 depth=16 Adam7
+  full   : output=    8192 B  internal_peak=   53298 B  total=   61490 B
+  region h=32: output=    8192 B (100.0%) internal_peak=   61746 B  total=   69938 B  decode_rc=0
+  region h=16: output=    4096 B ( 50.0%) internal_peak=   53554 B  total=   57650 B  decode_rc=0
+  region h= 8: output=    2048 B ( 25.0%) internal_peak=   49458 B  total=   51506 B  decode_rc=0
+  region h= 4: output=    1024 B ( 12.5%) internal_peak=   47410 B  total=   48434 B  decode_rc=0
+  region h= 1: output=     256 B (  3.1%) internal_peak=   45874 B  total=   46130 B  decode_rc=0
+tests/images/basn3p08.png 32x32 depth=8 non-int
+  full   : output=    4096 B  internal_peak=   48626 B  total=   52722 B
+  region h=32: output=    4096 B (100.0%) internal_peak=   48754 B  total=   52850 B  decode_rc=0
+  region h=16: output=    2048 B ( 50.0%) internal_peak=   46706 B  total=   48754 B  decode_rc=0
+  region h= 8: output=    1024 B ( 25.0%) internal_peak=   45682 B  total=   46706 B  decode_rc=0
+  region h= 4: output=     512 B ( 12.5%) internal_peak=   45170 B  total=   45682 B  decode_rc=0
+  region h= 1: output=     128 B (  3.1%) internal_peak=   44786 B  total=   44914 B  decode_rc=0

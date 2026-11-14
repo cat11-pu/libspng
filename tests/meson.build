@@ -36,6 +36,38 @@ test('info', test_exe, args : 'info')
 cpp_exe = executable('cpp_exe', 'test.cpp', dependencies : spng_dep)
 test('cpp_test', cpp_exe)
 
+region_test_exe = executable('region_test',
+    'region/region_test.c',
+    dependencies : spng_dep,
+)
+
+region_edge_exe = executable('region_edge_test',
+    'region/edge_test.c',
+    dependencies : spng_dep,
+)
+
+region_hcrop_exe = executable('region_hcrop_test',
+    'region/hcrop_test.c',
+    dependencies : spng_dep,
+)
+
+region_stream_exe = executable('region_stream_test',
+    'region/stream_test.c',
+    dependencies : spng_dep,
+)
+
+test('region_decode', region_test_exe,
+    args : files('region/big_n.png', 'region/big_i.png'))
+
+test('region_decode_edges', region_edge_exe,
+    workdir : meson.project_source_root())
+
+test('region_decode_hcrop', region_hcrop_exe,
+    workdir : meson.project_source_root())
+
+test('region_decode_stream', region_stream_exe,
+    workdir : meson.project_source_root())
+
 subdir('images')
 subdir('crashers')
 subdir('misc')
