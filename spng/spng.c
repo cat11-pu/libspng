@@ -2419,6 +2419,7 @@ static int read_non_idat_chunks(spng_ctx *ctx)
         {
             if(!memcmp(chunk.type, type_plte, 4))
             {
+                if(ctx->file.plte) return SPNG_EDUP_PLTE;
                 if(ctx->file.trns || ctx->file.hist || ctx->file.bkgd) return SPNG_ECHUNK_POS;
                 if(chunk.length % 3 != 0) return SPNG_ECHUNK_SIZE;
 
