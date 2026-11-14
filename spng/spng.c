@@ -535,14 +535,22 @@ static void u16_row_to_bigendian(void *row, size_t size)
     }
 }
 
+#if defined(SPNG_X86) && !defined(SPNG_DISABLE_OPT)
+static void rgb8_row_to_rgba8_sse(const unsigned char *row, unsigned char *out, uint32_t n);
+#endif
+
 static void rgb8_row_to_rgba8(const unsigned char *row, unsigned char *out, uint32_t n)
 {
+#if defined(SPNG_X86) && !defined(SPNG_DISABLE_OPT)
+    rgb8_row_to_rgba8_sse(row, out, n);
+#else
     uint32_t i;
     for(i=0; i < n; i++)
     {
         memcpy(out + i * 4, row + i * 3, 3);
         out[i*4+3] = 255;
     }
+#endif
 }
 
 static unsigned num_channels(const struct spng_ihdr *ihdr)
@@ -6250,6 +6258,47 @@ static void store3(void* p, __m128i v)
     int tmp = _mm_cvtsi128_si32(v);
     memcpy(p, &tmp, 3);
 }
+
+/* Expand packed RGB8 rows to RGBA8, inserting a fully opaque alpha byte.
+   SSSE3 pshufb expands four pixels (12 input bytes -> 16 output bytes) per
+   iteration.  Output is byte-identical to the scalar memcpy loop. */
+#if SPNG_SSE >= 3
+static void rgb8_row_to_rgba8_sse(const unsigned char *row, unsigned char *out, uint32_t n)
+{
+    const __m128i shuffle = _mm_setr_epi8(
+        0, 1, 2, 0xFF,  3, 4, 5, 0xFF,
+        6, 7, 8, 0xFF,  9, 10, 11, 0xFF);
+    const __m128i alpha_mask = _mm_setr_epi8(
+        0, 0, 0, -1,  0, 0, 0, -1,
+        0, 0, 0, -1,  0, 0, 0, -1);
+    const __m128i alpha = _mm_set1_epi8((char)0xFF);
+
+    uint32_t i = 0;
+    for(; i + 4 <= n; i += 4)
+    {
+        __m128i rgb = _mm_loadu_si128((const __m128i *)(row + (size_t)i * 3));
+        __m128i rgba = _mm_shuffle_epi8(rgb, shuffle);
+        rgba = _mm_or_si128(rgba, _mm_and_si128(alpha, alpha_mask));
+        _mm_storeu_si128((__m128i *)(out + (size_t)i * 4), rgba);
+    }
+
+    for(; i < n; i++)
+    {
+        memcpy(out + (size_t)i * 4, row + (size_t)i * 3, 3);
+        out[i * 4 + 3] = 255;
+    }
+}
+#else
+static void rgb8_row_to_rgba8_sse(const unsigned char *row, unsigned char *out, uint32_t n)
+{
+    uint32_t i;
+    for(i=0; i < n; i++)
+    {
+        memcpy(out + (size_t)i * 4, row + (size_t)i * 3, 3);
+        out[i*4+3] = 255;
+    }
+}
+#endif
 
 static void defilter_sub3(size_t rowbytes, unsigned char *row)
 {
